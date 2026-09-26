@@ -52,7 +52,7 @@ export default function Scanner() {
         }
       }));
 
-      // Keep streaming the camera feed silently in the background
+      // Stream camera frames continuously in the background
       captureInterval = setInterval(() => {
         if (isActive) sendFrame(ws);
       }, 2500);
@@ -69,7 +69,6 @@ export default function Scanner() {
         const data = JSON.parse(responseText);
         const textParts = data?.serverContent?.modelTurn?.parts;
         
-        // CRITICAL FIX: The API streams text token-by-token, so we must append it to the previous state
         if (textParts && textParts.length > 0) {
           setResult((prev) => {
             if (prev === "Waiting for the next multiple-choice question to appear." || prev === "") {
@@ -130,19 +129,15 @@ export default function Scanner() {
     }
   };
 
-  // MANUAL TRIGGER: Sends a text prompt asking the AI to read the current video buffer
+  // FIXED: Uses realtimeInput text channel to prevent protocol disconnection
   const triggerScan = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      setResult(""); // Clear the old answer
+      setResult(""); 
       setStatus("ANALYZING QUESTION...");
       
       wsRef.current.send(JSON.stringify({
-        clientContent: {
-          turns: [{
-            role: "user",
-            parts: [{ text: "Look at the screen right now. Read the question and options, and tell me the correct answer." }]
-          }],
-          turnComplete: true
+        realtimeInput: {
+          text: "Look at the screen right now. Read the question and options, and state the correct answer."
         }
       }));
     }
@@ -167,7 +162,6 @@ export default function Scanner() {
           {status}
         </div>
         
-        {/* Replaced the decorative squares with a functional Scan Button */}
         <button 
           onClick={triggerScan}
           className="mb-6 px-8 py-3 bg-white text-black font-bold tracking-wide rounded-full hover:bg-gray-200 active:scale-95 transition-all"

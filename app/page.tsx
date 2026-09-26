@@ -11,8 +11,8 @@ export default function Scanner() {
   const [isError, setIsError] = useState<boolean>(false);
 
   useEffect(() => {
-    let isActive = true;
-
+    let isActive = true; 
+    
     const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
     if (!apiKey) {
       setStatus("ERROR: API KEY IS MISSING");
@@ -35,43 +35,48 @@ export default function Scanner() {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      if (!isActive) return;
-
-      console.log("WebSocket Connection Opened Successfully");
-      setStatus("CONNECTED. MONITORING SCREEN.");
+      if (!isActive) return; 
+      
+      setStatus("CONNECTED. POINT AT A QUESTION.");
       setIsError(false);
 
       ws.send(JSON.stringify({
         setup: {
-          model: "models/gemini-3.8-live",
+          model: "models/gemini-3.8-live", 
           generationConfig: {
-            responseModalities: ["TEXT"]
+            responseModalities: ["TEXT"] 
           },
           systemInstruction: {
-            parts: [{ text: "You are an MCQ scanner. Read the multiple-choice question from the video feed and state only the correct answer and a brief reason." }]
+            parts: [{ text: "You are a fast, precise MCQ scanner. When asked to evaluate the screen, identify the multiple-choice question, read the options, and state the correct answer with a brief reason." }]
           }
         }
       }));
 
+      // Keep streaming the camera feed silently in the background
       captureInterval = setInterval(() => {
         if (isActive) sendFrame(ws);
       }, 2500);
     };
 
-    // CRITICAL FIX: Convert binary Blob to text before parsing
     ws.onmessage = async (event: MessageEvent) => {
       if (!isActive) return;
       try {
         let responseText = event.data;
-
         if (event.data instanceof Blob) {
           responseText = await event.data.text();
         }
-
+        
         const data = JSON.parse(responseText);
         const textParts = data?.serverContent?.modelTurn?.parts;
+        
+        // CRITICAL FIX: The API streams text token-by-token, so we must append it to the previous state
         if (textParts && textParts.length > 0) {
-          setResult(textParts[0].text);
+          setResult((prev) => {
+            if (prev === "Waiting for the next multiple-choice question to appear." || prev === "") {
+              return textParts[0].text;
+            }
+            return prev + textParts[0].text;
+          });
         }
       } catch (e) {
         console.error("Failed to parse Gemini response", e);
@@ -79,26 +84,22 @@ export default function Scanner() {
     };
 
     ws.onerror = (error: Event) => {
-      if (!isActive) return;
-
-      console.error("WebSocket Connection Error:", error);
+      if (!isActive) return; 
       setStatus("CONNECTION REJECTED");
       setIsError(true);
     };
 
     ws.onclose = (event: CloseEvent) => {
-      if (!isActive) return;
-
-      console.log(`WebSocket Connection Closed. Code: ${event.code}, Reason: ${event.reason}`);
+      if (!isActive) return; 
       setStatus("DISCONNECTED. REFRESH TO RECONNECT.");
       setIsError(true);
     };
 
     return () => {
-      isActive = false;
+      isActive = false; 
       if (captureInterval) clearInterval(captureInterval);
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
+        ws.close(); 
       }
     };
   }, []);
@@ -115,7 +116,7 @@ export default function Scanner() {
 
     context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
     const base64Data = canvas.toDataURL("image/jpeg", 0.5);
-    const base64Image = base64Data.split(",")[1];
+    const base64Image = base64Data.split(",")[1]; 
 
     if (base64Image) {
       ws.send(JSON.stringify({
@@ -129,16 +130,34 @@ export default function Scanner() {
     }
   };
 
+  // MANUAL TRIGGER: Sends a text prompt asking the AI to read the current video buffer
+  const triggerScan = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      setResult(""); // Clear the old answer
+      setStatus("ANALYZING QUESTION...");
+      
+      wsRef.current.send(JSON.stringify({
+        clientContent: {
+          turns: [{
+            role: "user",
+            parts: [{ text: "Look at the screen right now. Read the question and options, and tell me the correct answer." }]
+          }],
+          turnComplete: true
+        }
+      }));
+    }
+  };
+
   return (
     <main className="min-h-screen flex flex-col bg-black font-sans">
       <canvas ref={canvasRef} className="hidden" />
 
       <div className="flex-1 relative flex items-center justify-center bg-gray-900 overflow-hidden">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
+        <video 
+          ref={videoRef} 
+          autoPlay 
+          playsInline 
+          muted 
           className="w-full h-full object-cover"
         />
       </div>
@@ -147,11 +166,16 @@ export default function Scanner() {
         <div className={`px-4 py-2 rounded-full text-xs font-bold tracking-wider mb-6 ${isError ? 'bg-red-950 text-red-500' : 'bg-blue-950 text-blue-400'}`}>
           {status}
         </div>
-        <div className="flex gap-1 mb-8">
-          <div className="w-6 h-3 bg-white rounded-sm"></div>
-          <div className="w-6 h-3 bg-white rounded-sm"></div>
-        </div>
-        <p className="text-gray-400 text-sm text-center max-w-md px-4">
+        
+        {/* Replaced the decorative squares with a functional Scan Button */}
+        <button 
+          onClick={triggerScan}
+          className="mb-6 px-8 py-3 bg-white text-black font-bold tracking-wide rounded-full hover:bg-gray-200 active:scale-95 transition-all"
+        >
+          SCAN NOW
+        </button>
+
+        <p className="text-gray-300 text-sm text-center max-w-md px-4 overflow-y-auto max-h-24">
           {result}
         </p>
       </div>
